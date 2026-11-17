@@ -1,4 +1,4 @@
-name: Build kernel (SM-A256E)
+name: Build kernel (A256E)
 
 on:
   workflow_dispatch:
