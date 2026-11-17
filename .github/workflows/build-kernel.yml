@@ -12,6 +12,22 @@ on:
           - peta_defconfig
           - petardo_defconfig
           - s5e8825-a25xdxx_defconfig
+      metodo:
+        description: "incluido = usar SukiSU/SuSFS ya integrados en esta rama; script = partir del código original y ejecutar integration/integrate_sukisu_susfs.sh"
+        required: true
+        default: incluido
+        type: choice
+        options:
+          - incluido
+          - script
+      base_ref:
+        description: "Rama/commit con el código original de Samsung (solo para metodo=script)"
+        required: false
+        default: main
+      script_args:
+        description: "Opciones extra para el script, p. ej. --latest o --no-kpm (solo para metodo=script)"
+        required: false
+        default: ""
   push:
     branches: [main]
     paths-ignore: ["**.md", "Documentation/**"]
@@ -52,6 +68,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Integrate SukiSU + SuSFS with script (from original source)
+        if: inputs.metodo == 'script'
+        env:
+          BASE_REF: ${{ inputs.base_ref || 'main' }}
+          SCRIPT_ARGS: ${{ inputs.script_args }}
+        run: |
+          cp integration/integrate_sukisu_susfs.sh "$RUNNER_TEMP/"
+          git fetch --depth 1 origin "$BASE_REF"
+          git checkout -q --force FETCH_HEAD
+          git log -1 --format='Código base: %h %s'
+          bash "$RUNNER_TEMP/integrate_sukisu_susfs.sh" $SCRIPT_ARGS .
 
       - name: Install build dependencies
         run: |
@@ -128,6 +156,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ env.DEFCONFIG }}-${{ github.sha }}
+          name: kernel-${{ env.DEFCONFIG }}-${{ inputs.metodo || 'incluido' }}-${{ github.sha }}
           path: dist/
           if-no-files-found: warn
