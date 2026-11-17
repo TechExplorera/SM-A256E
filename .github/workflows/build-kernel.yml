@@ -29,9 +29,11 @@ env:
   DEFCONFIG: ${{ inputs.defconfig || 'peta_defconfig' }}
   CLANG_VERSION: clang-r416183b
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz
-  OUT_DIR: out
+  # Se compila dentro del árbol (como build_kernel.sh): varios Makefiles de
+  # Samsung usan rutas -I relativas que fallan con O=<dir>.
+  OUT_DIR: .
   MAKE_ARGS: >-
-    O=out ARCH=arm64 LLVM=1 LLVM_IAS=1
+    ARCH=arm64 LLVM=1 LLVM_IAS=1
     PLATFORM_VERSION=12 ANDROID_MAJOR_VERSION=s TARGET_SOC=s5e8825
     CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
@@ -98,7 +100,7 @@ jobs:
           cp -v "$OUT_DIR/arch/arm64/boot/Image" dist/ 2>/dev/null || true
           cp -v "$OUT_DIR/.config" dist/config 2>/dev/null || true
           cp -v build.log dist/ 2>/dev/null || true
-          find "$OUT_DIR" -name '*.ko' -exec cp {} dist/modules/ \; 2>/dev/null || true
+          find "$OUT_DIR" -path ./.git -prune -o -path ./dist -prune -o -name '*.ko' -exec cp {} dist/modules/ \; 2>/dev/null || true
           ls -la dist
 
       - name: Upload artifacts
