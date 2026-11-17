@@ -1,0 +1,110 @@
+name: Build kernel (SM-A256E)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: "Defconfig a compilar (arch/arm64/configs)"
+        required: true
+        default: peta_defconfig
+        type: choice
+        options:
+          - peta_defconfig
+          - petardo_defconfig
+          - s5e8825-a25xdxx_defconfig
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "Documentation/**"]
+  pull_request:
+    paths-ignore: ["**.md", "Documentation/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DEFCONFIG: ${{ inputs.defconfig || 'peta_defconfig' }}
+  CLANG_VERSION: clang-r416183b
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz
+  OUT_DIR: out
+  MAKE_ARGS: >-
+    O=out ARCH=arm64 LLVM=1 LLVM_IAS=1
+    PLATFORM_VERSION=12 ANDROID_MAJOR_VERSION=s TARGET_SOC=s5e8825
+    CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex cpio kmod lz4 rsync python3 \
+            libssl-dev libelf-dev \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+
+      - name: Cache AOSP clang
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchain/${{ env.CLANG_VERSION }}
+          key: aosp-${{ env.CLANG_VERSION }}
+
+      - name: Download AOSP clang
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/toolchain/$CLANG_VERSION
+          curl -sSfL --retry 3 "$CLANG_URL" | tar -xz -C ~/toolchain/$CLANG_VERSION
+
+      - name: Set up toolchain
+        run: |
+          echo "$HOME/toolchain/$CLANG_VERSION/bin" >> "$GITHUB_PATH"
+          "$HOME/toolchain/$CLANG_VERSION/bin/clang" --version
+
+      - name: Configure (${{ env.DEFCONFIG }})
+        run: |
+          make $MAKE_ARGS "$DEFCONFIG"
+          # Algunos defconfigs traen una ruta absoluta del servidor de Samsung.
+          scripts/config --file "$OUT_DIR/.config" \
+            --set-str UNUSED_KSYMS_WHITELIST gki/abi_symbollist.raw
+          grep -E '^CONFIG_(LOCALVERSION|KSU|KSU_SUSFS)[= ]' "$OUT_DIR/.config" || true
+
+      - name: Build
+        run: |
+          set -o pipefail
+          make $MAKE_ARGS olddefconfig
+          make $MAKE_ARGS -j"$(nproc)" 2>&1 | tee build.log
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p dist/modules
+          cp -v "$OUT_DIR/arch/arm64/boot/Image" dist/ 2>/dev/null || true
+          cp -v "$OUT_DIR/.config" dist/config 2>/dev/null || true
+          cp -v build.log dist/ 2>/dev/null || true
+          find "$OUT_DIR" -name '*.ko' -exec cp {} dist/modules/ \; 2>/dev/null || true
+          ls -la dist
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.DEFCONFIG }}-${{ github.sha }}
+          path: dist/
+          if-no-files-found: warn
