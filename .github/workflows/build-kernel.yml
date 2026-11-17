@@ -93,10 +93,31 @@ jobs:
           make $MAKE_ARGS olddefconfig
           make $MAKE_ARGS -j"$(nproc)" 2>&1 | tee build.log
 
+      - name: Verify SukiSU / SuSFS config
+        run: |
+          grep -E '^CONFIG_(KSU|KPM)[A-Z_]*=' "$OUT_DIR/.config" || echo "KernelSU/SukiSU desactivado en $DEFCONFIG"
+
+      # KPM de SukiSU necesita inyectar KernelPatch en la Image ya compilada.
+      # Si falla, se conserva la Image sin parchear (SukiSU y SuSFS siguen funcionando).
+      - name: Patch Image for KPM (SukiSU)
+        id: kpm
+        continue-on-error: true
+        run: |
+          grep -q '^CONFIG_KPM=y' "$OUT_DIR/.config" || { echo "CONFIG_KPM desactivado, se omite"; exit 0; }
+          cd "$OUT_DIR/arch/arm64/boot"
+          cp Image Image.nokpm
+          curl -sSfL --retry 3 -o patch_linux \
+            https://github.com/ShirkNeko/SukiSU_KernelPatch_patch/releases/latest/download/patch_linux
+          chmod +x patch_linux
+          ./patch_linux
+          mv oImage Image
+          echo "Image parcheada para KPM"
+
       - name: Collect artifacts
         if: always()
         run: |
           mkdir -p dist/modules
+          cp -v "$OUT_DIR/arch/arm64/boot/Image.nokpm" dist/ 2>/dev/null || true
           cp -v "$OUT_DIR/arch/arm64/boot/Image" dist/ 2>/dev/null || true
           cp -v "$OUT_DIR/.config" dist/config 2>/dev/null || true
           cp -v build.log dist/ 2>/dev/null || true
