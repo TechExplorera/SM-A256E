@@ -155,14 +155,19 @@ for d in $DEFCONFIGS; do
   f=arch/arm64/configs/$d
   [ -f "$f" ] || { warn "No existe $f, se omite"; continue; }
   sed -i -E '/^CONFIG_(KSU|KSU_[A-Z_]+|KPM)=/d; /^# CONFIG_(KSU|KSU_[A-Z_]+|KPM) is not set/d' "$f"
+  # Desactivar las protecciones de Samsung que pelean con el root (RKP/KDP/PROCA
+  # caen solas por depender de UH/FIVE). SELinux se mantiene. Solo aplica si el
+  # defconfig las trae activas (los defconfig stock sí, los peta/petardo no).
+  sed -i -E '/^CONFIG_(UH|RKP|KDP|KDP_CRED|KDP_NS|SECURITY_DEFEX|FIVE|FIVE_[A-Z_]+|PROCA|PROCA_[A-Z_]+)[= ]/d; /^# CONFIG_(UH|RKP|KDP|SECURITY_DEFEX|FIVE|PROCA) is not set/d' "$f"
   {
     echo "CONFIG_KSU=y"
     [ $KPM = y ] && echo "CONFIG_KPM=y"
     for o in SUSFS SUSFS_SUS_PATH SUSFS_SUS_MOUNT SUSFS_SUS_KSTAT SUSFS_SPOOF_UNAME \
              SUSFS_ENABLE_LOG SUSFS_HIDE_KSU_SUSFS_SYMBOLS SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
              SUSFS_OPEN_REDIRECT SUSFS_SUS_MAP; do echo "CONFIG_KSU_$o=y"; done
+    for s in UH RKP KDP SECURITY_DEFEX FIVE PROCA; do echo "# CONFIG_$s is not set"; done
   } >> "$f"
-  log "Activado KernelSU en $d (KPM=$KPM, SuSFS=y)"
+  log "Activado KernelSU en $d (KPM=$KPM, SuSFS=y); protecciones Samsung off"
 done
 
 log "Listo. Compila con: make <defconfig> && make (ver build_kernel.sh)"
